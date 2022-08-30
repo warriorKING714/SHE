@@ -1,0 +1,47 @@
+name: 'IRDEVQ3 checkonly deployment'
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANUAL_COMMIT_ID:
+        description: Manual Commit ID    
+        required: true            
+ 
+jobs:
+  IrdevQ3CheckOnlyPipeline:
+
+    if: ${{ github.ref == 'refs/heads/release' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Install Salesforce CLI
+        run: |
+          wget https://developer.salesforce.com/media/salesforce-cli/sfdx-linux-amd64.tar.xz
+          mkdir sfdx-cli
+          tar xJf sfdx-linux-amd64.tar.xz -C sfdx-cli --strip-components 1
+          ./sfdx-cli/install
+          echo 'y' | sfdx plugins:install sfpowerkit
+          echo 'y' | sfdx plugins:install @dxatscale/sfpowerscripts
+      - name: Authenticating IRDEVQ3 sandbox
+        run: |
+          echo "${IRDEVQ3_SECRET_KEY}" > irdevq3server.key
+          sfdx auth:jwt:grant --clientid ${{ secrets.IRDEVQ3_CLIENTID }} --jwtkeyfile irdevq3server.key --username ${{ secrets.IRDEVQ3_USERNAME }} --instanceurl ${{ secrets.IRDEVQ3_SANDBOX_URL }} -a irdevq3org        
+#          sfdx sfpowerkit:auth:login -u ${{ secrets.BASIC_IRDEVQ3_USERNAME }} -p ${{ secrets.BASIC_IRDEVQ3_PASSWORD }} -r ${{ secrets.BASIC_IRDEVQ3_SANDBOX_URL }} -a irdevq3org
+        env:
+          IRDEVQ3_SECRET_KEY: ${{ secrets.IRDEVQ3_SECRET_KEY }}
+      - name: Commit Based build
+        run: |
+         echo "Manual commit id is ${{ github.event.inputs.MANUAL_COMMIT_ID }}"
+         sfdx sfpowerkit:project:diff -r ${{ github.event.inputs.MANUAL_COMMIT_ID }} -d delta_pkg
+      - name: Checkonly Validation to IRDEVQ3
+        run: |
+         cd delta_pkg
+         ls
+         cat diff.json
+         TESTS=$(cat testsToRun.txt)
+         echo "APEX_TESTS=$TESTS" >> $GITHUB_ENV
+         echo ${{env.APEX_TESTS}}
+         sfdx force:source:deploy -c -p force-app -l RunSpecifiedTests -r ${{env.APEX_TESTS}} -u irdevq3org
